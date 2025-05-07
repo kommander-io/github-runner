@@ -12,6 +12,8 @@ using GitHub.Runner.Sdk;
 using System.Text;
 using System.Diagnostics;
 using GitHub.Runner.Worker.Telemetry;
+using OpenTelemetry;
+using OpenTelemetry.Metrics;
 
 namespace GitHub.Runner.Worker
 {
