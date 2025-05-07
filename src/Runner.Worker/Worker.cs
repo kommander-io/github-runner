@@ -10,10 +10,6 @@ using GitHub.Services.WebApi;
 using GitHub.Runner.Common;
 using GitHub.Runner.Sdk;
 using System.Text;
-using System.Diagnostics;
-using GitHub.Runner.Worker.Telemetry;
-using OpenTelemetry;
-using OpenTelemetry.Metrics;
 
 namespace GitHub.Runner.Worker
 {
@@ -27,10 +23,6 @@ namespace GitHub.Runner.Worker
     {
         private readonly TimeSpan _workerStartTimeout = TimeSpan.FromSeconds(30);
         private ManualResetEvent _completedCommand = new(false);
-        private static readonly ActivitySource _activitySource = OpenTelemetryConfig.CreateActivitySource("GitHub.Runner.Worker");
-        private static readonly Meter _meter = OpenTelemetryConfig.CreateMeter("GitHub.Runner.Worker");
-        private static readonly Counter<long> _jobCounter = _meter.CreateCounter<long>("github.runner.otel.jobs.total", "Number of jobs processed");
-        private static readonly Histogram<double> _jobDuration = _meter.CreateHistogram<double>("github.runner.otel.job.duration", "seconds", "Job execution duration in seconds");
 
         // Do not mask the values of these secrets
         private static HashSet<String> SecretVariableMaskWhitelist = new(StringComparer.OrdinalIgnoreCase)
@@ -41,10 +33,6 @@ namespace GitHub.Runner.Worker
 
         public async Task<int> RunAsync(string pipeIn, string pipeOut)
         {
-            using var activity = _activitySource.StartActivity("RunAsync");
-            activity?.SetTag("pipeIn", pipeIn);
-            activity?.SetTag("pipeOut", pipeOut);
-
             try
             {
                 // Setup way to handle SIGTERM/unloading signals
@@ -103,7 +91,6 @@ namespace GitHub.Runner.Worker
 
                     // Start the job.
                     Trace.Info($"Job message:{Environment.NewLine} {StringUtil.ConvertToJson(jobMessage)}");
-                    var jobStartTime = DateTime.UtcNow;
                     Task<TaskResult> jobRunnerTask = jobRunner.RunAsync(jobMessage, jobRequestCancellationToken.Token);
 
                     // Start listening for a cancel message from the channel.
@@ -118,13 +105,7 @@ namespace GitHub.Runner.Worker
                     {
                         Trace.Info("Job completed.");
                         channelTokenSource.Cancel(); // Cancel waiting for a message from the channel.
-                        var result = await jobRunnerTask;
-                        var jobDuration = (DateTime.UtcNow - jobStartTime).TotalSeconds;
-                        _jobCounter.Add(1);
-                        _jobDuration.Record(jobDuration);
-                        activity?.SetTag("job.duration", jobDuration);
-                        activity?.SetTag("job.result", result.ToString());
-                        return TaskResultUtil.TranslateToReturnCode(result);
+                        return TaskResultUtil.TranslateToReturnCode(await jobRunnerTask);
                     }
 
                     // Otherwise a cancel message was received from the channel.
@@ -146,19 +127,8 @@ namespace GitHub.Runner.Worker
                     }
 
                     // Await the job.
-                    var finalResult = await jobRunnerTask;
-                    var finalJobDuration = (DateTime.UtcNow - jobStartTime).TotalSeconds;
-                    _jobCounter.Add(1);
-                    _jobDuration.Record(finalJobDuration);
-                    activity?.SetTag("job.duration", finalJobDuration);
-                    activity?.SetTag("job.result", finalResult.ToString());
-                    return TaskResultUtil.TranslateToReturnCode(finalResult);
+                    return TaskResultUtil.TranslateToReturnCode(await jobRunnerTask);
                 }
-            }
-            catch (Exception ex)
-            {
-                activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-                throw;
             }
             finally
             {
