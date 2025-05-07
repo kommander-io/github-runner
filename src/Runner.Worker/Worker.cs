@@ -10,6 +10,10 @@ using GitHub.Services.WebApi;
 using GitHub.Runner.Common;
 using GitHub.Runner.Sdk;
 using System.Text;
+using OpenTelemetry;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 
 namespace GitHub.Runner.Worker
 {
@@ -24,6 +28,8 @@ namespace GitHub.Runner.Worker
         private readonly TimeSpan _workerStartTimeout = TimeSpan.FromSeconds(30);
         private ManualResetEvent _completedCommand = new(false);
 
+        private MeterProvider _meterProvider;
+        
         // Do not mask the values of these secrets
         private static HashSet<String> SecretVariableMaskWhitelist = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -35,6 +41,27 @@ namespace GitHub.Runner.Worker
         {
             try
             {
+                var otlpEndpoint = Environment.GetEnvironmentVariable("OTLP_ENDPOINT");
+                if(otlpEndpoint != null)
+                {
+                    // If OTLP_ENDPOINT is set, use it as the endpoint for the OpenTelemetry exporter
+                    Trace.Info($"Using OTLP endpoint: {otlpEndpoint}");
+                    //setup the OpenTelemetry
+                    _meterProvider = OpenTelemetry.Sdk.CreateMeterProviderBuilder().AddMeter("GitHub.Runner.Worker")
+                        .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("GitHub.Runner.Worker"))
+                        .AddOtlpExporter(options =>
+                        {
+                            options.Endpoint = new Uri("http://localhost:4317"); // works everywhere
+                            options.Protocol = OtlpExportProtocol.Grpc;
+                        })
+                        .Build();
+                }
+                else
+                {
+                    Trace.Info("Open Telemetry is not configured.");
+                }
+               
+                
                 // Setup way to handle SIGTERM/unloading signals
                 _completedCommand.Reset();
                 HostContext.Unloading += Worker_Unloading;
@@ -134,6 +161,7 @@ namespace GitHub.Runner.Worker
             {
                 HostContext.Unloading -= Worker_Unloading;
                 _completedCommand.Set();
+                _meterProvider?.Dispose();
             }
         }
 
