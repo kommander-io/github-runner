@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using GitHub.Runner.Common;
 using GitHub.Runner.Sdk;
 using System.Diagnostics;
+using GitHub.Runner.Worker.Telemetry;
 
 namespace GitHub.Runner.Worker
 {
@@ -23,6 +24,18 @@ namespace GitHub.Runner.Worker
             if (StringUtil.ConvertToBoolean(Environment.GetEnvironmentVariable("GITHUB_ACTIONS_RUNNER_ATTACH_DEBUGGER")))
             {
                 await WaitForDebugger(trace);
+            }
+
+            // Initialize OpenTelemetry
+            var otelEndpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
+            if (otelEndpoint == null)
+            {
+                trace.Info("OTEL_EXPORTER_OTLP_ENDPOINT is not set, skipping OpenTelemetry initialization");
+            }
+            else
+            {
+                trace.Info($"Initializing OpenTelemetry with endpoint: {otelEndpoint}");
+                OpenTelemetryConfig.Initialize("github-runner-worker", BuildConstants.RunnerPackage.Version);
             }
 
             // We may want to consider registering this handler in Worker.cs, similiar to the unloading/SIGTERM handler
@@ -66,11 +79,13 @@ namespace GitHub.Runner.Worker
                     Console.WriteLine(e.ToString());
                 }
             }
+            finally
+            {
+                OpenTelemetryConfig.Shutdown();
+            }
 
             return 1;
         }
-
-
 
         /// <summary>
         /// Runner.Worker is started by Runner.Listener in a separate process,
