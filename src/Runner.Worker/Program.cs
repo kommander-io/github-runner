@@ -4,16 +4,11 @@ using System.Threading.Tasks;
 using GitHub.Runner.Common;
 using GitHub.Runner.Sdk;
 using System.Diagnostics;
-using OpenTelemetry;
-using OpenTelemetry.Exporter;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
 namespace GitHub.Runner.Worker
 {
     public static class Program
     {
-        static MeterProvider _meterProvider;
-
+        
         public static int Main(string[] args)
         {
             using (HostContext context = new("Worker"))
@@ -30,27 +25,6 @@ namespace GitHub.Runner.Worker
             {
                 await WaitForDebugger(trace);
             }
-
-
-            var otlpEndpoint = Environment.GetEnvironmentVariable("OTLP_ENDPOINT");
-            if(otlpEndpoint != null)
-            {
-                trace.Info($"Using OTLP endpoint: {otlpEndpoint}");
-                //setup the OpenTelemetry
-                _meterProvider = OpenTelemetry.Sdk.CreateMeterProviderBuilder().AddMeter("GitHub.Runner.Worker")
-                    .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("GitHub.Runner.Worker"))
-                    .AddOtlpExporter(options =>
-                    {
-                        options.Endpoint = new Uri(otlpEndpoint);
-                        options.Protocol = OtlpExportProtocol.Grpc;
-                    })
-                    .Build();
-            }
-            else
-            {
-                trace.Info("Open Telemetry is not configured.");
-            }
-
 
             // We may want to consider registering this handler in Worker.cs, similiar to the unloading/SIGTERM handler
             //ITerminal registers a CTRL-C handler, which keeps the Runner.Worker process running
@@ -92,10 +66,6 @@ namespace GitHub.Runner.Worker
                     // since IOException will throw when we run out of disk space.
                     Console.WriteLine(e.ToString());
                 }
-            }
-            finally
-            {
-                _meterProvider?.Dispose();
             }
             return 1;
         }
